@@ -12,12 +12,18 @@
     <link rel="apple-touch-icon" href="app_icon.png">
     <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
     <script>
-        // Check if app is running as installed PWA and redirect immediately
-        if (window.matchMedia('(display-mode: standalone)').matches || 
-            window.navigator.standalone === true) {
-            // The app is running as an installed PWA - redirect to GitHub Pages
-            window.location.href = 'https://saleslima.github.io/IDIOMA/';
-        }
+        // Improved PWA detection and redirect
+        window.addEventListener('load', () => {
+            // Check if app is running as installed PWA
+            if (window.matchMedia('(display-mode: standalone)').matches || 
+                window.navigator.standalone === true) {
+                console.log("PWA mode detected - redirecting to GitHub Pages");
+                // Redirect with a slight delay to ensure it works on all devices
+                setTimeout(() => {
+                    window.location.href = 'https://saleslima.github.io/IDIOMA/';
+                }, 100);
+            }
+        });
     </script>
 </head>
 <body>
@@ -78,8 +84,12 @@
         // Register service worker
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(reg => console.log('Service Worker registered'))
+                navigator.serviceWorker.register('sw.js', {scope: './'})
+                    .then(reg => {
+                        console.log('Service Worker registered with scope:', reg.scope);
+                        // Update service worker if needed
+                        reg.update();
+                    })
                     .catch(err => console.log('Service Worker registration failed:', err));
             });
         }
