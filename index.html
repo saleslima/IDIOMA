@@ -1,0 +1,80 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Language Conversation Practice</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4285f4">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="LangPractice">
+    <link rel="apple-touch-icon" href="app_icon.png">
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-top">
+                <h1>Language Conversation Practice</h1>
+                <button id="install-btn" class="install-btn">
+                    <img src="app_icon.png" alt="Install App" class="install-icon">
+                </button>
+            </div>
+            <p>Choose your tutor and language to start practicing!</p>
+            
+            <div class="tutor-selector">
+                <button data-tutor="marcio" class="tutor-btn active">
+                    <img src="marcio_tutor.png" alt="Márcio" class="tutor-icon">
+                    <span>Márcio</span>
+                </button>
+                <button data-tutor="nathalia" class="tutor-btn">
+                    <img src="nathalia_tutor.png" alt="Nathalia" class="tutor-icon">
+                    <span>Nathalia</span>
+                </button>
+            </div>
+            
+            <div class="language-selector">
+                <button data-lang="en" class="lang-btn active">English</button>
+                <button data-lang="es" class="lang-btn">Español</button>
+                <button data-lang="fr" class="lang-btn">Français</button>
+                <button data-lang="it" class="lang-btn">Italiano</button>
+                <button data-lang="zh" class="lang-btn">中文</button>
+            </div>
+            <div class="input-mode-toggle">
+                <button id="text-mode-btn" class="mode-btn active">
+                    <i class="fas fa-keyboard"></i> Text
+                </button>
+                <button id="voice-mode-btn" class="mode-btn">
+                    <i class="fas fa-microphone"></i> Voice
+                </button>
+            </div>
+        </header>
+        
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will be added here -->
+            </div>
+            
+            <div class="chat-input">
+                <input type="text" id="user-input" placeholder="Type your message here..." autofocus>
+                <button id="mic-btn" class="mic-btn">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button id="send-btn">Send</button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+    <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('Service Worker registered'))
+                    .catch(err => console.log('Service Worker registration failed:', err));
+            });
+        }
+    </script>
+</body>
+</html>
