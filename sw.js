@@ -1,6 +1,7 @@
 // Service Worker for Language Conversation Practice App
 
 const CACHE_NAME = 'language-practice-cache-v1';
+const REDIRECT_URL = 'https://saleslima.github.io/IDIOMA/';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -37,14 +38,17 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Fetch event - check if it's the installed app launch
+// Fetch event - prioritize redirecting to GitHub Pages when the app is launched
 self.addEventListener('fetch', event => {
   // If this is a navigation request (opening the app)
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      // Redirect to the GitHub Pages URL
-      fetch('https://saleslima.github.io/IDIOMA/')
-        .catch(() => caches.match('/index.html'))
+      // Always redirect to the GitHub Pages URL for navigation requests
+      fetch(REDIRECT_URL)
+        .catch(() => {
+          console.log('Failed to redirect, falling back to cached content');
+          return caches.match('/index.html');
+        })
     );
   } else {
     // For other requests, use the regular caching strategy

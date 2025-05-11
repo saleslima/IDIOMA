@@ -61,6 +61,12 @@ document.addEventListener('DOMContentLoaded', () => {
         deferredPrompt.prompt();
         // Wait for the user to respond to the prompt
         const { outcome } = await deferredPrompt.userChoice;
+        console.log(`Installation outcome: ${outcome}`);
+        
+        if (outcome === 'accepted') {
+            alert('App installed successfully! When you open the app, you will be redirected to the language practice page.');
+        }
+        
         // We no longer need the prompt
         deferredPrompt = null;
         // Hide the install button
