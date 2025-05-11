@@ -37,15 +37,25 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Fetch event - serve from cache if available or fetch
+// Fetch event - check if it's the installed app launch
 self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        if (response) {
-          return response;
-        }
-        return fetch(event.request);
-      })
-  );
+  // If this is a navigation request (opening the app)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      // Redirect to the GitHub Pages URL
+      fetch('https://saleslima.github.io/IDIOMA/')
+        .catch(() => caches.match('/index.html'))
+    );
+  } else {
+    // For other requests, use the regular caching strategy
+    event.respondWith(
+      caches.match(event.request)
+        .then(response => {
+          if (response) {
+            return response;
+          }
+          return fetch(event.request);
+        })
+    );
+  }
 });

@@ -11,6 +11,14 @@
     <meta name="apple-mobile-web-app-title" content="LangPractice">
     <link rel="apple-touch-icon" href="app_icon.png">
     <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <script>
+        // Check if app is running as installed PWA and redirect
+        if (window.matchMedia('(display-mode: standalone)').matches || 
+            window.navigator.standalone === true) {
+            // The app is running as an installed PWA - redirect to GitHub Pages
+            window.location.href = 'https://saleslima.github.io/IDIOMA/';
+        }
+    </script>
 </head>
 <body>
     <div class="container">
