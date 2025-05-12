@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const voiceModeBtn = document.getElementById('voice-mode-btn');
     const tutorButtons = document.querySelectorAll('.tutor-btn');
     const installBtn = document.getElementById('install-btn');
-    
+
     let userName = "";
     let isAskingName = true;
     let conversationHistory = [];
@@ -20,7 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let deferredPrompt = null;
     let isExternalServer = false;
     let aiProvider = null;
-    
+
+    // Predefined OpenAI API key for use outside of websim environment
+    const DEFAULT_OPENAI_KEY = "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";
+
     class AIProviders {
         constructor() {
             this.providers = {
@@ -50,10 +53,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     tts: this.fallbackTTS.bind(this)
                 }
             };
-            
+
             this.initProviders();
         }
-        
+
         async initProviders() {
             try {
                 if (typeof websim !== 'undefined') {
@@ -63,23 +66,33 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (e) {
                 console.log('Websim API not available');
             }
-            
+
+            // Try to get user's saved API key first
             const openaiKey = localStorage.getItem('openai_api_key');
+
             if (openaiKey) {
                 this.providers.openai.apiKey = openaiKey;
                 this.providers.openai.available = true;
-                console.log('OpenAI API key found');
+                console.log('Using saved OpenAI API key');
+            } else {
+                // If no saved key, use the default key
+                this.providers.openai.apiKey = DEFAULT_OPENAI_KEY;
+                this.providers.openai.available = true;
+                console.log('Using default OpenAI API key');
             }
-            
+
+            // Set provider priority
             if (this.providers.websim.available) {
                 this.primaryProvider = 'websim';
+                console.log('Using websim as primary provider');
             } else if (this.providers.openai.available) {
                 this.primaryProvider = 'openai';
+                console.log('Using OpenAI as primary provider');
             } else {
                 this.primaryProvider = 'fallback';
-                this.promptForAPIKey();
+                console.log('Using fallback provider');
             }
-            
+
             if (this.providers.websim.available) {
                 this.ttsProvider = 'websim';
             } else if (this.providers.browser.available) {
@@ -87,14 +100,32 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 this.ttsProvider = 'fallback';
             }
-            
+
+            // Add provider indicator to the UI
+            this.updateProviderIndicator();
+
             console.log(`Using AI provider: ${this.primaryProvider}`);
             console.log(`Using TTS provider: ${this.ttsProvider}`);
         }
-        
+
+        updateProviderIndicator() {
+            let container = document.querySelector('.container');
+            let indicator = document.querySelector('.provider-indicator');
+
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.className = 'provider-indicator';
+                container.appendChild(indicator);
+            }
+
+            let providerName = this.providers[this.primaryProvider].name;
+            providerName = providerName.charAt(0).toUpperCase() + providerName.slice(1);
+            indicator.textContent = `AI Provider: ${providerName}`;
+        }
+
         promptForAPIKey() {
             if (sessionStorage.getItem('api_key_prompted')) return;
-            
+
             setTimeout(() => {
                 const apiKey = prompt("To enable AI features, you can enter an OpenAI API key. Leave blank to use simplified responses.");
                 if (apiKey && apiKey.trim().startsWith('sk-')) {
@@ -102,21 +133,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.providers.openai.apiKey = apiKey.trim();
                     this.providers.openai.available = true;
                     this.primaryProvider = 'openai';
+                    this.updateProviderIndicator();
                     alert("API key saved! Refresh the page to use enhanced AI features.");
                 }
                 sessionStorage.setItem('api_key_prompted', 'true');
             }, 2000);
         }
-        
+
         async chat(messages) {
             try {
                 return await this.providers[this.primaryProvider].chat(messages);
             } catch (error) {
                 console.error(`Error with ${this.primaryProvider} chat:`, error);
+
+                // If websim fails, try OpenAI before falling back to simple responses
+                if (this.primaryProvider === 'websim' && this.providers.openai.available) {
+                    try {
+                        console.log('Falling back to OpenAI');
+                        return await this.providers.openai.chat(messages);
+                    } catch (openaiError) {
+                        console.error('OpenAI fallback failed:', openaiError);
+                    }
+                }
+
                 return await this.providers.fallback.chat(messages);
             }
         }
-        
+
         async tts(text, voice) {
             try {
                 return await this.providers[this.ttsProvider].tts(text, voice);
@@ -128,13 +171,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 return null;
             }
         }
-        
+
         async websimChat(messages) {
             const completion = await websim.chat.completions.create({
                 messages: messages,
                 json: true
             });
-            
+
             try {
                 return JSON.parse(completion.content);
             } catch (error) {
@@ -144,25 +187,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }
         }
-        
+
         async websimTTS(text, voice) {
             const result = await websim.textToSpeech({
                 text: text,
                 voice: voice
             });
-            
+
             return {
                 url: result.url,
                 audio: new Audio(result.url)
             };
         }
-        
+
         async openaiChat(messages) {
             const formattedMessages = messages.map(msg => ({
                 role: msg.role,
                 content: msg.content
             }));
-            
+
             try {
                 const response = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
@@ -176,17 +219,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         temperature: 0.7
                     })
                 });
-                
+
                 if (!response.ok) {
-                    throw new Error(`OpenAI API error: ${response.status}`);
+                    const errorData = await response.json();
+                    console.error('OpenAI API error:', errorData);
+                    throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
                 }
-                
+
                 const data = await response.json();
                 const content = data.choices[0].message.content;
-                
+
                 try {
                     return JSON.parse(content);
                 } catch (error) {
+                    // If the response isn't valid JSON, handle it gracefully
                     return {
                         response: content,
                         corrections: []
@@ -197,18 +243,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw error;
             }
         }
-        
+
         async browserTTS(text, voice) {
             return new Promise((resolve, reject) => {
                 if (!window.speechSynthesis) {
                     reject('Browser speech synthesis not available');
                     return;
                 }
-                
+
                 const voiceParts = voice.split('-');
                 const langCode = voiceParts[0];
                 const voiceGender = voiceParts[1] || 'female';
-                
+
                 const langMap = {
                     'en': 'en-US',
                     'es': 'es-ES',
@@ -216,10 +262,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     'it': 'it-IT',
                     'zh': 'zh-CN'
                 };
-                
+
                 const utterance = new SpeechSynthesisUtterance(text);
                 utterance.lang = langMap[langCode] || 'en-US';
-                
+
                 let voices = window.speechSynthesis.getVoices();
                 if (voices.length === 0) {
                     window.speechSynthesis.onvoiceschanged = () => {
@@ -229,21 +275,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     setVoice();
                 }
-                
+
                 function setVoice() {
                     const langVoices = voices.filter(v => 
                         v.lang.startsWith(langCode) || v.lang.startsWith(langMap[langCode]));
-                    
+
                     if (langVoices.length > 0) {
                         const genderMatch = voiceGender === 'female' ? 
                             langVoices.find(v => v.name.includes('Female') || v.name.includes('female')) :
                             langVoices.find(v => v.name.includes('Male') || v.name.includes('male'));
-                        
+
                         utterance.voice = genderMatch || langVoices[0];
                     }
-                    
+
                     window.speechSynthesis.speak(utterance);
-                    
+
                     const dummyAudio = {
                         play: () => {
                             window.speechSynthesis.speak(utterance);
@@ -255,37 +301,37 @@ document.addEventListener('DOMContentLoaded', () => {
                             window.speechSynthesis.cancel();
                         }
                     };
-                    
+
                     resolve({
                         url: null,
                         audio: dummyAudio
                     });
                 }
-                
+
                 utterance.onerror = (event) => {
                     reject(`Speech synthesis error: ${event.error}`);
                 };
             });
         }
-        
+
         async fallbackChat(messages) {
             const userMessage = messages.find(msg => msg.role === 'user');
             let userContent = '';
-            
+
             if (userMessage) {
                 userContent = userMessage.content;
             }
-            
+
             const systemMessage = messages.find(msg => msg.role === 'system');
             let currentLang = 'en';
-            
+
             if (systemMessage && systemMessage.content) {
                 if (systemMessage.content.includes('Spanish')) currentLang = 'es';
                 else if (systemMessage.content.includes('French')) currentLang = 'fr';
                 else if (systemMessage.content.includes('Italian')) currentLang = 'it';
                 else if (systemMessage.content.includes('Chinese')) currentLang = 'zh';
             }
-            
+
             const responses = {
                 en: [
                     "Hello! How are you today?",
@@ -338,7 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     "这是很好的练习！继续吧！"
                 ]
             };
-            
+
             if (userContent.match(/hello|hi|hey|good morning|good afternoon|good evening/i) ||
                 userContent.match(/hola|buenos días|buenas tardes|buenas noches/i) ||
                 userContent.match(/bonjour|salut|bonsoir/i) ||
@@ -349,51 +395,51 @@ document.addEventListener('DOMContentLoaded', () => {
                     corrections: []
                 };
             }
-            
+
             const randomIndex = Math.floor(Math.random() * (responses[currentLang].length - 1)) + 1;
             return {
                 response: responses[currentLang][randomIndex],
                 corrections: []
             };
         }
-        
+
         async fallbackTTS(text, voice) {
             console.log('No TTS available, skipping audio');
             return null;
         }
     }
-    
+
     const aiAPI = new AIProviders();
-    
+
     try {
         isExternalServer = typeof websim === 'undefined';
     } catch (e) {
         isExternalServer = true;
         console.log('Running on external server without websim API');
     }
-    
+
     const isPWA = () => {
         return window.matchMedia('(display-mode: standalone)').matches || 
                window.navigator.standalone === true;
     };
-    
+
     if (isPWA()) {
         sessionStorage.setItem('pwaMode', 'true');
-        
+
         if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
             navigator.serviceWorker.controller.postMessage({
                 type: 'SET_PWA_MODE'
             });
         }
     }
-    
+
     let currentTutor = {
         id: "marcio",
         name: "Márcio",
         gender: "male",
         avatarSrc: "marcio_tutor.png"
     };
-    
+
     const tutors = {
         marcio: {
             id: "marcio",
@@ -421,13 +467,13 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('To install this app on iOS: tap the share button and then "Add to Home Screen"');
             return;
         }
-        
+
         deferredPrompt.prompt();
-        
+
         try {
             const { outcome } = await deferredPrompt.userChoice;
             console.log(`Installation outcome: ${outcome}`);
-            
+
             if (outcome === 'accepted') {
                 console.log('App was installed');
                 sessionStorage.setItem('installAccepted', 'true');
@@ -435,7 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error('Error during installation:', error);
         }
-        
+
         deferredPrompt = null;
         installBtn.style.display = 'none';
     });
@@ -447,25 +493,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 recognition = new SpeechRecognition();
                 recognition.continuous = false;
                 recognition.interimResults = false;
-                
+
                 recognition.onresult = (event) => {
                     const transcript = event.results[0][0].transcript;
                     userInput.value = transcript;
                     stopRecording();
                     sendMessage();
                 };
-                
+
                 recognition.onerror = (event) => {
                     console.error('Speech recognition error', event.error);
                     stopRecording();
-                    
+
                     if (event.error === 'not-allowed' || event.error === 'permission-denied') {
                         alert('Please allow microphone access to use voice input.');
                     } else if (event.error === 'network') {
                         alert('Network error occurred. Please check your connection.');
                     }
                 };
-                
+
                 recognition.onend = () => {
                     stopRecording();
                 };
@@ -479,10 +525,10 @@ document.addEventListener('DOMContentLoaded', () => {
             voiceModeBtn.style.display = 'none';
         }
     }
-    
+
     function startRecording() {
         if (!recognition) return;
-        
+
         try {
             recognition.lang = getSpeechRecognitionLanguage();
             recognition.start();
@@ -492,10 +538,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Speech recognition error', error);
         }
     }
-    
+
     function stopRecording() {
         if (!recognition) return;
-        
+
         try {
             recognition.stop();
             isRecording = false;
@@ -504,7 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Speech recognition error', error);
         }
     }
-    
+
     function getSpeechRecognitionLanguage() {
         const langMap = {
             'en': 'en-US',
@@ -515,17 +561,17 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         return langMap[currentLanguage] || 'en-US';
     }
-    
+
     function getTTSVoice() {
         return `${currentLanguage}-${currentTutor.gender}`;
     }
-    
+
     async function playBotAudio(text) {
         const cacheKey = `${currentLanguage}-${currentTutor.gender}-${text}`;
-        
+
         try {
             let audioResult;
-            
+
             if (audioCache[cacheKey]) {
                 if (audioCache[cacheKey].audio) {
                     audioCache[cacheKey].audio.play();
@@ -538,24 +584,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else {
                 audioResult = await aiAPI.tts(text, getTTSVoice());
-                
+
                 if (!audioResult) return null;
-                
+
                 audioCache[cacheKey] = audioResult;
-                
+
                 if (audioResult.audio) {
                     audioResult.audio.play();
                     return audioResult.audio;
                 }
             }
-            
+
             return null;
         } catch (error) {
             console.error('Text-to-speech error', error);
             return null;
         }
     }
-    
+
     const languageConfig = {
         en: {
             name: "English",
@@ -705,7 +751,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isUser) {
             const audioControls = document.createElement('div');
             audioControls.className = 'audio-controls';
-            
+
             const playButton = document.createElement('button');
             playButton.className = 'audio-btn';
             playButton.innerHTML = '<i class="fas fa-play"></i>';
@@ -713,7 +759,7 @@ document.addEventListener('DOMContentLoaded', () => {
             playButton.addEventListener('click', () => {
                 playButton.disabled = true;
                 playButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-                
+
                 playBotAudio(text)
                     .then(() => {
                         setTimeout(() => {
@@ -726,10 +772,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         playButton.innerHTML = '<i class="fas fa-play"></i>';
                     });
             });
-            
+
             audioControls.appendChild(playButton);
             messageContent.appendChild(audioControls);
-            
+
             if (isVoiceMode) {
                 setTimeout(() => {
                     playButton.click();
@@ -740,21 +786,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (corrections && corrections.length > 0) {
             const correctionDiv = document.createElement('div');
             correctionDiv.className = 'correction';
-            
+
             const correctionTitle = document.createElement('div');
             correctionTitle.className = 'correction-title';
             correctionTitle.textContent = 'Corrections:';
             correctionDiv.appendChild(correctionTitle);
-            
+
             const correctionList = document.createElement('ul');
             correctionList.className = 'correction-list';
-            
+
             corrections.forEach(correction => {
                 const correctionItem = document.createElement('li');
-                
+
                 correctionItem.textContent = `"${correction.error}" should be "${correction.correction}" - ${correction.explanation}`;
                 correctionList.appendChild(correctionItem);
-                
+
                 if (correction.correctedSentence) {
                     const correctedSentenceDiv = document.createElement('div');
                     correctedSentenceDiv.className = 'corrected-sentence';
@@ -762,7 +808,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     correctionItem.appendChild(correctedSentenceDiv);
                 }
             });
-            
+
             correctionDiv.appendChild(correctionList);
             messageDiv.appendChild(correctionDiv);
         }
@@ -777,21 +823,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 role: "user",
                 content: userText
             });
-            
+
             if (conversationHistory.length > 12) { 
                 conversationHistory = [
                     conversationHistory[0], 
                     ...conversationHistory.slice(-11) 
                 ];
             }
-            
+
             const result = await aiAPI.chat(conversationHistory);
-            
+
             conversationHistory.push({
                 role: "assistant",
                 content: JSON.stringify(result)
             });
-            
+
             return result;
         } catch (error) {
             console.error("Error generating AI response:", error);
@@ -804,14 +850,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleNameResponse(name) {
         userName = name.trim();
-        
+
         conversationHistory.push({
             role: "system",
             content: `The user's name is ${userName}. Greet them warmly in ${languageConfig[currentLanguage].name} and suggest a topic to discuss.`
         });
-        
+
         const result = await generateAIResponse("My name is " + userName);
-        
+
         addMessage(result.response, false, result.corrections);
         isAskingName = false;
     }
@@ -821,7 +867,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await handleNameResponse(userText);
             return;
         }
-        
+
         const typingDiv = document.createElement('div');
         typingDiv.className = 'message bot typing';
         const botAvatar = document.createElement('img');
@@ -829,24 +875,24 @@ document.addEventListener('DOMContentLoaded', () => {
         botAvatar.alt = currentTutor.name;
         botAvatar.className = 'bot-avatar';
         typingDiv.appendChild(botAvatar);
-        
+
         const typingContent = document.createElement('div');
         typingContent.className = 'message-content';
         typingContent.textContent = languageConfig[currentLanguage].typingText;
         typingDiv.appendChild(typingContent);
-        
+
         chatMessages.appendChild(typingDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
-        
+
         try {
             const result = await generateAIResponse(userText);
-            
+
             chatMessages.removeChild(typingDiv);
-            
+
             addMessage(result.response, false, result.corrections);
         } catch (error) {
             chatMessages.removeChild(typingDiv);
-            
+
             addMessage("I'm sorry, I couldn't process your message. Please try again.", false);
         }
     }
@@ -854,16 +900,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function sendMessage() {
         const text = userInput.value.trim();
         if (text === '') return;
-        
+
         addMessage(text, true);
         userInput.value = '';
-        
+
         botResponse(text);
     }
 
     function toggleInputMode(mode) {
         isVoiceMode = mode === 'voice';
-        
+
         if (isVoiceMode) {
             voiceModeBtn.classList.add('active');
             textModeBtn.classList.remove('active');
@@ -879,7 +925,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function changeTutor(tutorId) {
         if (currentTutor.id === tutorId) return;
-        
+
         tutorButtons.forEach(btn => {
             if (btn.dataset.tutor === tutorId) {
                 btn.classList.add('active');
@@ -887,15 +933,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.classList.remove('active');
             }
         });
-        
+
         currentTutor = tutors[tutorId];
-        
+
         resetConversation();
     }
 
     function changeLanguage(langCode) {
         if (currentLanguage === langCode) return;
-        
+
         languageButtons.forEach(btn => {
             if (btn.dataset.lang === langCode) {
                 btn.classList.add('active');
@@ -903,9 +949,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.classList.remove('active');
             }
         });
-        
+
         currentLanguage = langCode;
-        
+
         resetConversation();
     }
 
@@ -914,13 +960,13 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.placeholder = isVoiceMode ? 
             languageConfig[currentLanguage].voiceInputPlaceholder : 
             languageConfig[currentLanguage].inputPlaceholder;
-        
+
         chatMessages.innerHTML = '';
         isAskingName = true;
         userName = "";
-        
+
         conversationHistory = [initializeSystemPrompt()];
-        
+
         const greeting = languageConfig[currentLanguage].greeting(currentTutor.name);
         addMessage(greeting, false);
     }
@@ -931,7 +977,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sendMessage();
         }
     });
-    
+
     micBtn.addEventListener('click', () => {
         if (isRecording) {
             stopRecording();
@@ -939,22 +985,22 @@ document.addEventListener('DOMContentLoaded', () => {
             startRecording();
         }
     });
-    
+
     textModeBtn.addEventListener('click', () => toggleInputMode('text'));
     voiceModeBtn.addEventListener('click', () => toggleInputMode('voice'));
-    
+
     tutorButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             changeTutor(btn.dataset.tutor);
         });
     });
-    
+
     languageButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             changeLanguage(btn.dataset.lang);
         });
     });
-    
+
     initSpeechRecognition();
     toggleInputMode('text'); 
     conversationHistory = [initializeSystemPrompt()];
@@ -966,10 +1012,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(reg => {
                     console.log('Service Worker registered with scope:', reg.scope);
                     reg.update().catch(err => console.log('Service Worker update failed:', err));
-                    
+
                     if (navigator.serviceWorker.controller) {
                         console.log('Service Worker is controlling the page');
-                        
+
                         if (isPWA()) {
                             navigator.serviceWorker.controller.postMessage({
                                 type: 'SET_PWA_MODE'
@@ -982,4 +1028,67 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
         });
     }
+
+    // API Settings Dialog functionality
+    const apiSettings = document.getElementById('api-settings');
+    const openaiKey = document.getElementById('openai-key');
+    const saveApiSettings = document.getElementById('save-api-settings');
+    const clearApiSettings = document.getElementById('clear-api-settings');
+    const closeSettings = document.querySelector('.close-settings');
+
+    saveApiSettings.addEventListener('click', () => {
+        const key = openaiKey.value.trim();
+        if (key && key.startsWith('sk-')) {
+            localStorage.setItem('openai_api_key', key);
+            aiAPI.providers.openai.apiKey = key;
+            aiAPI.providers.openai.available = true;
+
+            if (aiAPI.primaryProvider !== 'websim') {
+                aiAPI.primaryProvider = 'openai';
+                aiAPI.updateProviderIndicator();
+            }
+
+            alert('API key saved successfully!');
+            apiSettings.style.display = 'none';
+        } else {
+            alert('Please enter a valid OpenAI API key starting with "sk-"');
+        }
+    });
+
+    clearApiSettings.addEventListener('click', () => {
+        if (confirm('Are you sure you want to clear your API keys? This will revert to using the default key.')) {
+            localStorage.removeItem('openai_api_key');
+            aiAPI.providers.openai.apiKey = DEFAULT_OPENAI_KEY;
+            openaiKey.value = '';
+            alert('API keys cleared. Using default key now.');
+
+            if (aiAPI.primaryProvider !== 'websim') {
+                aiAPI.updateProviderIndicator();
+            }
+        }
+    });
+
+    closeSettings.addEventListener('click', () => {
+        apiSettings.style.display = 'none';
+    });
+
+    // Add API settings button to the header
+    const headerTop = document.querySelector('.header-top');
+    const settingsButton = document.createElement('button');
+    settingsButton.className = 'settings-icon';
+    settingsButton.innerHTML = '<i class="fas fa-cog"></i>';
+    settingsButton.title = 'API Settings';
+    settingsButton.addEventListener('click', () => {
+        // Pre-fill with current value if available
+        if (aiAPI.providers.openai.apiKey && 
+            aiAPI.providers.openai.apiKey !== DEFAULT_OPENAI_KEY) {
+            openaiKey.value = aiAPI.providers.openai.apiKey;
+        } else {
+            openaiKey.value = '';
+            openaiKey.placeholder = 'Using default API key';
+        }
+        apiSettings.style.display = 'block';
+    });
+
+    headerTop.insertBefore(settingsButton, installBtn);
 });

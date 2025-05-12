@@ -428,6 +428,12 @@ header h1 {
     color: white;
     font-size: 1.2rem;
     cursor: pointer;
+    padding: 5px;
+    margin-right: 5px;
+}
+
+.settings-icon:hover {
+    color: #f0f0f0;
 }
 
 .provider-indicator {
@@ -437,6 +443,9 @@ header h1 {
     padding: 5px;
     background-color: #f9f9f9;
     border-top: 1px solid #eee;
+    position: relative;
+    bottom: 0;
+    width: 100%;
 }
 
 /* Mobile responsiveness improvements */

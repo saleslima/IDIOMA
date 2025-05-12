@@ -87,17 +87,18 @@
             <div class="api-settings-content">
                 <span class="close-settings">&times;</span>
                 <h2>AI Provider Settings</h2>
-                <p>To enable enhanced AI features, you can provide an OpenAI API key. Without an API key, the app will use simpler responses.</p>
+                <p>A default OpenAI API key is already provided. You can use your own key for better performance.</p>
                 <div class="input-group">
                     <label for="openai-key">OpenAI API Key:</label>
-                    <input type="password" id="openai-key" placeholder="sk-...">
+                    <input type="password" id="openai-key" placeholder="Using default API key">
                 </div>
                 <div class="settings-buttons">
                     <button id="save-api-settings">Save</button>
-                    <button id="clear-api-settings">Clear Keys</button>
+                    <button id="clear-api-settings">Use Default Key</button>
                 </div>
             </div>
         </div>
+        <!-- Provider indicator will be added here by JavaScript -->
     </div>
     <script src="script.js"></script>
     <script>
