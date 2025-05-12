@@ -18,6 +18,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let recognition = null;
     let audioCache = {};
     let deferredPrompt = null;
+    let isExternalServer = false;
+    
+    // Check if we're running on an external server by detecting if websim is available
+    try {
+        isExternalServer = typeof websim === 'undefined';
+    } catch (e) {
+        isExternalServer = true;
+        console.log('Running on external server without websim API');
+    }
     
     // Add PWA detection
     const isPWA = () => {
@@ -195,8 +204,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${currentLanguage}-${currentTutor.gender}`;
     }
     
-    // Play audio for bot message
+    // Play audio for bot message - with external server compatibility
     async function playBotAudio(text) {
+        // If we're on an external server, show a message instead of audio
+        if (isExternalServer) {
+            console.log('Text-to-speech not available on external server');
+            return null;
+        }
+        
         const cacheKey = `${currentLanguage}-${currentTutor.gender}-${text}`;
         
         try {
@@ -233,7 +248,17 @@ document.addEventListener('DOMContentLoaded', () => {
             sendBtn: "Send",
             typingText: "Typing...",
             inputPlaceholder: "Type your message here...",
-            voiceInputPlaceholder: "Click the microphone to speak..."
+            voiceInputPlaceholder: "Click the microphone to speak...",
+            fallbackResponses: [
+                "Hello! How are you today?",
+                "That's interesting! Tell me more.",
+                "I understand. What else would you like to talk about?",
+                "Can you explain that in a different way?",
+                "Let's discuss something else. What are your hobbies?",
+                "Do you enjoy learning languages?",
+                "What's your favorite thing about learning English?",
+                "That's great practice! Keep going!"
+            ]
         },
         es: {
             name: "Spanish",
@@ -242,7 +267,17 @@ document.addEventListener('DOMContentLoaded', () => {
             sendBtn: "Enviar",
             typingText: "Escribiendo...",
             inputPlaceholder: "Escribe tu mensaje aquí...",
-            voiceInputPlaceholder: "Haz clic en el micrófono para hablar..."
+            voiceInputPlaceholder: "Haz clic en el micrófono para hablar...",
+            fallbackResponses: [
+                "¡Hola! ¿Cómo estás hoy?",
+                "¡Qué interesante! Cuéntame más.",
+                "Entiendo. ¿De qué más te gustaría hablar?",
+                "¿Puedes explicarlo de otra manera?",
+                "Hablemos de otra cosa. ¿Cuáles son tus pasatiempos?",
+                "¿Te gusta aprender idiomas?",
+                "¿Qué es lo que más te gusta de aprender español?",
+                "¡Esa es una buena práctica! ¡Continúa!"
+            ]
         },
         fr: {
             name: "French",
@@ -251,7 +286,17 @@ document.addEventListener('DOMContentLoaded', () => {
             sendBtn: "Envoyer",
             typingText: "En train d'écrire...",
             inputPlaceholder: "Écrivez votre message ici...",
-            voiceInputPlaceholder: "Cliquez sur le microphone pour parler..."
+            voiceInputPlaceholder: "Cliquez sur le microphone pour parler...",
+            fallbackResponses: [
+                "Bonjour ! Comment vas-tu aujourd'hui ?",
+                "C'est intéressant ! Dis-m'en plus.",
+                "Je comprends. De quoi d'autre aimerais-tu parler ?",
+                "Peux-tu l'expliquer d'une manière différente ?",
+                "Parlons d'autre chose. Quels sont tes passe-temps ?",
+                "Aimes-tu apprendre des langues ?",
+                "Qu'est-ce que tu préfères dans l'apprentissage du français ?",
+                "C'est une bonne pratique ! Continue !"
+            ]
         },
         it: {
             name: "Italian",
@@ -260,7 +305,17 @@ document.addEventListener('DOMContentLoaded', () => {
             sendBtn: "Invia",
             typingText: "Digitando...",
             inputPlaceholder: "Scrivi il tuo messaggio qui...",
-            voiceInputPlaceholder: "Clicca sul microfono per parlare..."
+            voiceInputPlaceholder: "Clicca sul microfono per parlare...",
+            fallbackResponses: [
+                "Ciao! Come stai oggi?",
+                "Interessante! Dimmi di più.",
+                "Capisco. Di cos'altro vorresti parlare?",
+                "Puoi spiegarlo in un altro modo?",
+                "Parliamo di qualcos'altro. Quali sono i tuoi hobby?",
+                "Ti piace imparare le lingue?",
+                "Qual è la cosa che ti piace di più dell'imparare l'italiano?",
+                "È un buon esercizio! Continua così!"
+            ]
         },
         zh: {
             name: "Chinese",
@@ -269,7 +324,17 @@ document.addEventListener('DOMContentLoaded', () => {
             sendBtn: "发送",
             typingText: "正在输入...",
             inputPlaceholder: "在这里输入您的消息...",
-            voiceInputPlaceholder: "点击麦克风说话..."
+            voiceInputPlaceholder: "点击麦克风说话...",
+            fallbackResponses: [
+                "你好！今天怎么样？",
+                "真有趣！请告诉我更多。",
+                "我明白了。你还想谈些什么？",
+                "你能用不同的方式解释一下吗？",
+                "让我们谈谈别的。你有什么爱好？",
+                "你喜欢学习语言吗？",
+                "你最喜欢学习中文的什么？",
+                "这是很好的练习！继续吧！"
+            ]
         }
     };
 
@@ -323,8 +388,8 @@ document.addEventListener('DOMContentLoaded', () => {
         messageContent.textContent = text;
         messageDiv.appendChild(messageContent);
 
-        // Add audio controls for bot messages
-        if (!isUser) {
+        // Add audio controls for bot messages - hide on external servers
+        if (!isUser && !isExternalServer) {
             const audioControls = document.createElement('div');
             audioControls.className = 'audio-controls';
             
@@ -390,9 +455,31 @@ document.addEventListener('DOMContentLoaded', () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // Generate AI response - improved error handling for online deployment
+    // Get fallback response for external servers without AI
+    function getFallbackResponse() {
+        const responses = languageConfig[currentLanguage].fallbackResponses;
+        const randomIndex = Math.floor(Math.random() * responses.length);
+        return {
+            response: responses[randomIndex],
+            corrections: []
+        };
+    }
+
+    // Generate AI response - with fallback for external servers
     async function generateAIResponse(userText) {
+        // If we're on an external server without websim, use fallback responses
+        if (isExternalServer) {
+            console.log('Using fallback responses for external server');
+            return getFallbackResponse();
+        }
+        
         try {
+            // Check if the websim object exists
+            if (typeof websim === 'undefined') {
+                console.log('Websim API not available, using fallback');
+                return getFallbackResponse();
+            }
+            
             // Add user message to conversation history
             conversationHistory.push({
                 role: "user",
@@ -435,10 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return result;
         } catch (error) {
             console.error("Error generating AI response:", error);
-            return {
-                response: "I'm sorry, I'm having trouble connecting to the AI service. Please check your internet connection and try again.",
-                corrections: []
-            };
+            return getFallbackResponse();
         }
     }
 
@@ -452,7 +536,20 @@ document.addEventListener('DOMContentLoaded', () => {
             content: `The user's name is ${userName}. Greet them warmly in ${languageConfig[currentLanguage].name} and suggest a topic to discuss.`
         });
         
-        const result = await generateAIResponse("My name is " + userName);
+        let result;
+        if (isExternalServer) {
+            // Use a simple greeting if on external server
+            const langConfig = languageConfig[currentLanguage];
+            const greeting = `${langConfig.greeting(currentTutor.name)} ${userName}! `;
+            result = {
+                response: greeting + langConfig.fallbackResponses[0],
+                corrections: []
+            };
+        } else {
+            // Use AI response if available
+            result = await generateAIResponse("My name is " + userName);
+        }
+        
         addMessage(result.response, false, result.corrections);
         isAskingName = false;
     }
