@@ -19,8 +19,352 @@ document.addEventListener('DOMContentLoaded', () => {
     let audioCache = {};
     let deferredPrompt = null;
     let isExternalServer = false;
+    let aiProvider = null;
     
-    // Check if we're running on an external server by detecting if websim is available
+    class AIProviders {
+        constructor() {
+            this.providers = {
+                websim: {
+                    name: 'websim',
+                    available: false,
+                    chat: this.websimChat.bind(this),
+                    tts: this.websimTTS.bind(this)
+                },
+                openai: {
+                    name: 'openai',
+                    available: false,
+                    apiKey: '',
+                    chat: this.openaiChat.bind(this),
+                    tts: null  
+                },
+                browser: {
+                    name: 'browser',
+                    available: !!window.speechSynthesis,
+                    chat: null, 
+                    tts: this.browserTTS.bind(this)
+                },
+                fallback: {
+                    name: 'fallback',
+                    available: true,
+                    chat: this.fallbackChat.bind(this),
+                    tts: this.fallbackTTS.bind(this)
+                }
+            };
+            
+            this.initProviders();
+        }
+        
+        async initProviders() {
+            try {
+                if (typeof websim !== 'undefined') {
+                    this.providers.websim.available = true;
+                    console.log('Websim API available');
+                }
+            } catch (e) {
+                console.log('Websim API not available');
+            }
+            
+            const openaiKey = localStorage.getItem('openai_api_key');
+            if (openaiKey) {
+                this.providers.openai.apiKey = openaiKey;
+                this.providers.openai.available = true;
+                console.log('OpenAI API key found');
+            }
+            
+            if (this.providers.websim.available) {
+                this.primaryProvider = 'websim';
+            } else if (this.providers.openai.available) {
+                this.primaryProvider = 'openai';
+            } else {
+                this.primaryProvider = 'fallback';
+                this.promptForAPIKey();
+            }
+            
+            if (this.providers.websim.available) {
+                this.ttsProvider = 'websim';
+            } else if (this.providers.browser.available) {
+                this.ttsProvider = 'browser';
+            } else {
+                this.ttsProvider = 'fallback';
+            }
+            
+            console.log(`Using AI provider: ${this.primaryProvider}`);
+            console.log(`Using TTS provider: ${this.ttsProvider}`);
+        }
+        
+        promptForAPIKey() {
+            if (sessionStorage.getItem('api_key_prompted')) return;
+            
+            setTimeout(() => {
+                const apiKey = prompt("To enable AI features, you can enter an OpenAI API key. Leave blank to use simplified responses.");
+                if (apiKey && apiKey.trim().startsWith('sk-')) {
+                    localStorage.setItem('openai_api_key', apiKey.trim());
+                    this.providers.openai.apiKey = apiKey.trim();
+                    this.providers.openai.available = true;
+                    this.primaryProvider = 'openai';
+                    alert("API key saved! Refresh the page to use enhanced AI features.");
+                }
+                sessionStorage.setItem('api_key_prompted', 'true');
+            }, 2000);
+        }
+        
+        async chat(messages) {
+            try {
+                return await this.providers[this.primaryProvider].chat(messages);
+            } catch (error) {
+                console.error(`Error with ${this.primaryProvider} chat:`, error);
+                return await this.providers.fallback.chat(messages);
+            }
+        }
+        
+        async tts(text, voice) {
+            try {
+                return await this.providers[this.ttsProvider].tts(text, voice);
+            } catch (error) {
+                console.error(`Error with ${this.ttsProvider} TTS:`, error);
+                if (this.ttsProvider !== 'browser' && this.providers.browser.available) {
+                    return await this.providers.browser.tts(text, voice);
+                }
+                return null;
+            }
+        }
+        
+        async websimChat(messages) {
+            const completion = await websim.chat.completions.create({
+                messages: messages,
+                json: true
+            });
+            
+            try {
+                return JSON.parse(completion.content);
+            } catch (error) {
+                return {
+                    response: completion.content || "I couldn't generate a proper response.",
+                    corrections: []
+                };
+            }
+        }
+        
+        async websimTTS(text, voice) {
+            const result = await websim.textToSpeech({
+                text: text,
+                voice: voice
+            });
+            
+            return {
+                url: result.url,
+                audio: new Audio(result.url)
+            };
+        }
+        
+        async openaiChat(messages) {
+            const formattedMessages = messages.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+            
+            try {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.providers.openai.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-3.5-turbo',
+                        messages: formattedMessages,
+                        temperature: 0.7
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`OpenAI API error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const content = data.choices[0].message.content;
+                
+                try {
+                    return JSON.parse(content);
+                } catch (error) {
+                    return {
+                        response: content,
+                        corrections: []
+                    };
+                }
+            } catch (error) {
+                console.error('OpenAI API error:', error);
+                throw error;
+            }
+        }
+        
+        async browserTTS(text, voice) {
+            return new Promise((resolve, reject) => {
+                if (!window.speechSynthesis) {
+                    reject('Browser speech synthesis not available');
+                    return;
+                }
+                
+                const voiceParts = voice.split('-');
+                const langCode = voiceParts[0];
+                const voiceGender = voiceParts[1] || 'female';
+                
+                const langMap = {
+                    'en': 'en-US',
+                    'es': 'es-ES',
+                    'fr': 'fr-FR',
+                    'it': 'it-IT',
+                    'zh': 'zh-CN'
+                };
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = langMap[langCode] || 'en-US';
+                
+                let voices = window.speechSynthesis.getVoices();
+                if (voices.length === 0) {
+                    window.speechSynthesis.onvoiceschanged = () => {
+                        voices = window.speechSynthesis.getVoices();
+                        setVoice();
+                    };
+                } else {
+                    setVoice();
+                }
+                
+                function setVoice() {
+                    const langVoices = voices.filter(v => 
+                        v.lang.startsWith(langCode) || v.lang.startsWith(langMap[langCode]));
+                    
+                    if (langVoices.length > 0) {
+                        const genderMatch = voiceGender === 'female' ? 
+                            langVoices.find(v => v.name.includes('Female') || v.name.includes('female')) :
+                            langVoices.find(v => v.name.includes('Male') || v.name.includes('male'));
+                        
+                        utterance.voice = genderMatch || langVoices[0];
+                    }
+                    
+                    window.speechSynthesis.speak(utterance);
+                    
+                    const dummyAudio = {
+                        play: () => {
+                            window.speechSynthesis.speak(utterance);
+                        },
+                        pause: () => {
+                            window.speechSynthesis.pause();
+                        },
+                        cancel: () => {
+                            window.speechSynthesis.cancel();
+                        }
+                    };
+                    
+                    resolve({
+                        url: null,
+                        audio: dummyAudio
+                    });
+                }
+                
+                utterance.onerror = (event) => {
+                    reject(`Speech synthesis error: ${event.error}`);
+                };
+            });
+        }
+        
+        async fallbackChat(messages) {
+            const userMessage = messages.find(msg => msg.role === 'user');
+            let userContent = '';
+            
+            if (userMessage) {
+                userContent = userMessage.content;
+            }
+            
+            const systemMessage = messages.find(msg => msg.role === 'system');
+            let currentLang = 'en';
+            
+            if (systemMessage && systemMessage.content) {
+                if (systemMessage.content.includes('Spanish')) currentLang = 'es';
+                else if (systemMessage.content.includes('French')) currentLang = 'fr';
+                else if (systemMessage.content.includes('Italian')) currentLang = 'it';
+                else if (systemMessage.content.includes('Chinese')) currentLang = 'zh';
+            }
+            
+            const responses = {
+                en: [
+                    "Hello! How are you today?",
+                    "That's interesting! Tell me more.",
+                    "I understand. What else would you like to talk about?",
+                    "Can you explain that in a different way?",
+                    "Let's discuss something else. What are your hobbies?",
+                    "Do you enjoy learning languages?",
+                    "What's your favorite thing about learning English?",
+                    "That's great practice! Keep going!"
+                ],
+                es: [
+                    "¡Hola! ¿Cómo estás hoy?",
+                    "¡Qué interesante! Cuéntame más.",
+                    "Entiendo. ¿De qué más te gustaría hablar?",
+                    "¿Puedes explicarlo de otra manera?",
+                    "Hablemos de otra cosa. ¿Cuáles son tus pasatiempos?",
+                    "¿Te gusta aprender idiomas?",
+                    "¿Qué es lo que más te gusta de aprender español?",
+                    "¡Esa es una buena práctica! ¡Continúa!"
+                ],
+                fr: [
+                    "Bonjour ! Comment vas-tu aujourd'hui ?",
+                    "C'est intéressant ! Dis-m'en plus.",
+                    "Je comprends. De quoi d'autre aimerais-tu parler ?",
+                    "Peux-tu l'expliquer d'une manière différente ?",
+                    "Parlons d'autre chose. Quels sont tes passe-temps ?",
+                    "Aimes-tu apprendre des langues ?",
+                    "Qu'est-ce que tu préfères dans l'apprentissage du français ?",
+                    "C'est une bonne pratique ! Continue !"
+                ],
+                it: [
+                    "Ciao! Come stai oggi?",
+                    "Interessante! Dimmi di più.",
+                    "Capisco. Di cos'altro vorresti parlare?",
+                    "Puoi spiegarlo in un altro modo?",
+                    "Parliamo di qualcos'altro. Quali sono i tuoi hobby?",
+                    "Ti piace imparare le lingue?",
+                    "Qual è la cosa che ti piace di più dell'imparare l'italiano?",
+                    "È un buon esercizio! Continua così!"
+                ],
+                zh: [
+                    "你好！今天怎么样？",
+                    "真有趣！请告诉我更多。",
+                    "我明白了。你还想谈些什么？",
+                    "你能用不同的方式解释一下吗？",
+                    "让我们谈谈别的。你有什么爱好？",
+                    "你喜欢学习语言吗？",
+                    "你最喜欢学习中文的什么？",
+                    "这是很好的练习！继续吧！"
+                ]
+            };
+            
+            if (userContent.match(/hello|hi|hey|good morning|good afternoon|good evening/i) ||
+                userContent.match(/hola|buenos días|buenas tardes|buenas noches/i) ||
+                userContent.match(/bonjour|salut|bonsoir/i) ||
+                userContent.match(/ciao|buongiorno|buonasera/i) ||
+                userContent.match(/你好|早上好|下午好|晚上好/i)) {
+                return {
+                    response: responses[currentLang][0],
+                    corrections: []
+                };
+            }
+            
+            const randomIndex = Math.floor(Math.random() * (responses[currentLang].length - 1)) + 1;
+            return {
+                response: responses[currentLang][randomIndex],
+                corrections: []
+            };
+        }
+        
+        async fallbackTTS(text, voice) {
+            console.log('No TTS available, skipping audio');
+            return null;
+        }
+    }
+    
+    const aiAPI = new AIProviders();
+    
     try {
         isExternalServer = typeof websim === 'undefined';
     } catch (e) {
@@ -28,17 +372,14 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Running on external server without websim API');
     }
     
-    // Add PWA detection
     const isPWA = () => {
         return window.matchMedia('(display-mode: standalone)').matches || 
                window.navigator.standalone === true;
     };
     
-    // Store PWA status in sessionStorage for consistent access
     if (isPWA()) {
         sessionStorage.setItem('pwaMode', 'true');
         
-        // Communicate to service worker that we're in PWA mode
         if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
             navigator.serviceWorker.controller.postMessage({
                 type: 'SET_PWA_MODE'
@@ -46,7 +387,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Character settings
     let currentTutor = {
         id: "marcio",
         name: "Márcio",
@@ -69,55 +409,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // PWA Installation - improved for online deployment
     window.addEventListener('beforeinstallprompt', (e) => {
-        // Prevent Chrome 67 and earlier from automatically showing the prompt
         e.preventDefault();
-        // Stash the event so it can be triggered later
         deferredPrompt = e;
-        // Update UI to show the install button
         installBtn.style.display = 'block';
-        
-        // Log that the installation prompt was detected
         console.log('Installation prompt detected and saved');
     });
 
     installBtn.addEventListener('click', async () => {
         if (!deferredPrompt) {
-            // The app is already installed or not installable
-            // For Safari on iOS where beforeinstallprompt is not supported
             alert('To install this app on iOS: tap the share button and then "Add to Home Screen"');
             return;
         }
         
-        // Show the installation prompt
         deferredPrompt.prompt();
         
         try {
-            // Wait for the user to respond to the prompt
             const { outcome } = await deferredPrompt.userChoice;
             console.log(`Installation outcome: ${outcome}`);
             
             if (outcome === 'accepted') {
                 console.log('App was installed');
-                
-                // Prepare for redirection after installation
                 sessionStorage.setItem('installAccepted', 'true');
-                
-                // On next launch, the PWA detection in index.html will handle redirection
             }
         } catch (error) {
             console.error('Error during installation:', error);
         }
         
-        // We no longer need the prompt
         deferredPrompt = null;
-        
-        // Hide the install button
         installBtn.style.display = 'none';
     });
 
-    // Initialize speech recognition - improved error handling
     function initSpeechRecognition() {
         if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
             try {
@@ -137,7 +459,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.error('Speech recognition error', event.error);
                     stopRecording();
                     
-                    // Show a user-friendly error message
                     if (event.error === 'not-allowed' || event.error === 'permission-denied') {
                         alert('Please allow microphone access to use voice input.');
                     } else if (event.error === 'network') {
@@ -155,12 +476,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             console.log('Speech recognition not supported in this browser');
             voiceModeBtn.disabled = true;
-            // Hide voice mode button on unsupported browsers
             voiceModeBtn.style.display = 'none';
         }
     }
     
-    // Start recording
     function startRecording() {
         if (!recognition) return;
         
@@ -174,7 +493,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Stop recording
     function stopRecording() {
         if (!recognition) return;
         
@@ -187,7 +505,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Get speech recognition language code
     function getSpeechRecognitionLanguage() {
         const langMap = {
             'en': 'en-US',
@@ -199,47 +516,46 @@ document.addEventListener('DOMContentLoaded', () => {
         return langMap[currentLanguage] || 'en-US';
     }
     
-    // Get text-to-speech voice
     function getTTSVoice() {
         return `${currentLanguage}-${currentTutor.gender}`;
     }
     
-    // Play audio for bot message - with external server compatibility
     async function playBotAudio(text) {
-        // If we're on an external server, show a message instead of audio
-        if (isExternalServer) {
-            console.log('Text-to-speech not available on external server');
-            return null;
-        }
-        
         const cacheKey = `${currentLanguage}-${currentTutor.gender}-${text}`;
         
         try {
-            let audioUrl;
+            let audioResult;
             
             if (audioCache[cacheKey]) {
-                audioUrl = audioCache[cacheKey];
+                if (audioCache[cacheKey].audio) {
+                    audioCache[cacheKey].audio.play();
+                    return audioCache[cacheKey].audio;
+                } else {
+                    const audio = new Audio(audioCache[cacheKey].url);
+                    audio.play();
+                    audioCache[cacheKey].audio = audio;
+                    return audio;
+                }
             } else {
-                const result = await websim.textToSpeech({
-                    text: text,
-                    voice: getTTSVoice()
-                });
+                audioResult = await aiAPI.tts(text, getTTSVoice());
                 
-                audioUrl = result.url;
-                audioCache[cacheKey] = audioUrl;
+                if (!audioResult) return null;
+                
+                audioCache[cacheKey] = audioResult;
+                
+                if (audioResult.audio) {
+                    audioResult.audio.play();
+                    return audioResult.audio;
+                }
             }
             
-            const audio = new Audio(audioUrl);
-            audio.play();
-            
-            return audio;
+            return null;
         } catch (error) {
             console.error('Text-to-speech error', error);
             return null;
         }
     }
     
-    // Language configuration
     const languageConfig = {
         en: {
             name: "English",
@@ -338,7 +654,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Initialize system prompt based on language and tutor
     function initializeSystemPrompt() {
         const langName = languageConfig[currentLanguage].name;
         return {
@@ -370,7 +685,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    // Add message to chat
     function addMessage(text, isUser, corrections = null) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
@@ -388,8 +702,7 @@ document.addEventListener('DOMContentLoaded', () => {
         messageContent.textContent = text;
         messageDiv.appendChild(messageContent);
 
-        // Add audio controls for bot messages - hide on external servers
-        if (!isUser && !isExternalServer) {
+        if (!isUser) {
             const audioControls = document.createElement('div');
             audioControls.className = 'audio-controls';
             
@@ -398,20 +711,25 @@ document.addEventListener('DOMContentLoaded', () => {
             playButton.innerHTML = '<i class="fas fa-play"></i>';
             playButton.title = 'Play message';
             playButton.addEventListener('click', () => {
-                playBotAudio(text);
                 playButton.disabled = true;
                 playButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
                 
-                setTimeout(() => {
-                    playButton.disabled = false;
-                    playButton.innerHTML = '<i class="fas fa-play"></i>';
-                }, 2000);
+                playBotAudio(text)
+                    .then(() => {
+                        setTimeout(() => {
+                            playButton.disabled = false;
+                            playButton.innerHTML = '<i class="fas fa-play"></i>';
+                        }, 500);
+                    })
+                    .catch(() => {
+                        playButton.disabled = false;
+                        playButton.innerHTML = '<i class="fas fa-play"></i>';
+                    });
             });
             
             audioControls.appendChild(playButton);
             messageContent.appendChild(audioControls);
             
-            // Play audio automatically in voice mode
             if (isVoiceMode) {
                 setTimeout(() => {
                     playButton.click();
@@ -434,11 +752,9 @@ document.addEventListener('DOMContentLoaded', () => {
             corrections.forEach(correction => {
                 const correctionItem = document.createElement('li');
                 
-                // Create main correction text
                 correctionItem.textContent = `"${correction.error}" should be "${correction.correction}" - ${correction.explanation}`;
                 correctionList.appendChild(correctionItem);
                 
-                // Add the full corrected sentence if available
                 if (correction.correctedSentence) {
                     const correctedSentenceDiv = document.createElement('div');
                     correctedSentenceDiv.className = 'corrected-sentence';
@@ -455,113 +771,57 @@ document.addEventListener('DOMContentLoaded', () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // Get fallback response for external servers without AI
-    function getFallbackResponse() {
-        const responses = languageConfig[currentLanguage].fallbackResponses;
-        const randomIndex = Math.floor(Math.random() * responses.length);
-        return {
-            response: responses[randomIndex],
-            corrections: []
-        };
-    }
-
-    // Generate AI response - with fallback for external servers
     async function generateAIResponse(userText) {
-        // If we're on an external server without websim, use fallback responses
-        if (isExternalServer) {
-            console.log('Using fallback responses for external server');
-            return getFallbackResponse();
-        }
-        
         try {
-            // Check if the websim object exists
-            if (typeof websim === 'undefined') {
-                console.log('Websim API not available, using fallback');
-                return getFallbackResponse();
-            }
-            
-            // Add user message to conversation history
             conversationHistory.push({
                 role: "user",
                 content: userText
             });
             
-            // Limit conversation history to last 10 messages to prevent token limit issues
-            if (conversationHistory.length > 12) { // 10 messages + 2 system messages
+            if (conversationHistory.length > 12) { 
                 conversationHistory = [
-                    conversationHistory[0], // Keep system message
-                    ...conversationHistory.slice(-11) // Keep last 11 messages
+                    conversationHistory[0], 
+                    ...conversationHistory.slice(-11) 
                 ];
             }
             
-            // Get AI response
-            const completion = await websim.chat.completions.create({
-                messages: conversationHistory,
-                json: true
-            });
+            const result = await aiAPI.chat(conversationHistory);
             
-            // Parse the response
-            let result;
-            try {
-                result = JSON.parse(completion.content);
-            } catch (parseError) {
-                console.error("Error parsing AI response:", parseError);
-                // Fallback for when the response isn't valid JSON
-                result = {
-                    response: completion.content || "I'm sorry, I couldn't generate a proper response.",
-                    corrections: []
-                };
-            }
-            
-            // Add AI response to conversation history
             conversationHistory.push({
                 role: "assistant",
-                content: completion.content
+                content: JSON.stringify(result)
             });
             
             return result;
         } catch (error) {
             console.error("Error generating AI response:", error);
-            return getFallbackResponse();
+            return {
+                response: "I'm sorry, I encountered an error. Let's continue our conversation.",
+                corrections: []
+            };
         }
     }
 
-    // Handle name response
     async function handleNameResponse(name) {
         userName = name.trim();
         
-        // Add a special system message about the user's name
         conversationHistory.push({
             role: "system",
             content: `The user's name is ${userName}. Greet them warmly in ${languageConfig[currentLanguage].name} and suggest a topic to discuss.`
         });
         
-        let result;
-        if (isExternalServer) {
-            // Use a simple greeting if on external server
-            const langConfig = languageConfig[currentLanguage];
-            const greeting = `${langConfig.greeting(currentTutor.name)} ${userName}! `;
-            result = {
-                response: greeting + langConfig.fallbackResponses[0],
-                corrections: []
-            };
-        } else {
-            // Use AI response if available
-            result = await generateAIResponse("My name is " + userName);
-        }
+        const result = await generateAIResponse("My name is " + userName);
         
         addMessage(result.response, false, result.corrections);
         isAskingName = false;
     }
 
-    // Bot response function
     async function botResponse(userText) {
         if (isAskingName) {
             await handleNameResponse(userText);
             return;
         }
         
-        // Show typing indicator
         const typingDiv = document.createElement('div');
         typingDiv.className = 'message bot typing';
         const botAvatar = document.createElement('img');
@@ -581,21 +841,16 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const result = await generateAIResponse(userText);
             
-            // Remove typing indicator
             chatMessages.removeChild(typingDiv);
             
-            // Add the actual response
             addMessage(result.response, false, result.corrections);
         } catch (error) {
-            // Remove typing indicator
             chatMessages.removeChild(typingDiv);
             
-            // Add error message
             addMessage("I'm sorry, I couldn't process your message. Please try again.", false);
         }
     }
 
-    // Send message function
     function sendMessage() {
         const text = userInput.value.trim();
         if (text === '') return;
@@ -606,7 +861,6 @@ document.addEventListener('DOMContentLoaded', () => {
         botResponse(text);
     }
 
-    // Toggle input mode
     function toggleInputMode(mode) {
         isVoiceMode = mode === 'voice';
         
@@ -623,11 +877,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Change tutor function
     function changeTutor(tutorId) {
         if (currentTutor.id === tutorId) return;
         
-        // Update UI
         tutorButtons.forEach(btn => {
             if (btn.dataset.tutor === tutorId) {
                 btn.classList.add('active');
@@ -636,18 +888,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        // Update current tutor
         currentTutor = tutors[tutorId];
         
-        // Reset the conversation with the new tutor
         resetConversation();
     }
 
-    // Change language function
     function changeLanguage(langCode) {
         if (currentLanguage === langCode) return;
         
-        // Update UI
         languageButtons.forEach(btn => {
             if (btn.dataset.lang === langCode) {
                 btn.classList.add('active');
@@ -656,35 +904,27 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        // Update language
         currentLanguage = langCode;
         
-        // Reset the conversation with the new language
         resetConversation();
     }
 
-    // Reset conversation
     function resetConversation() {
-        // Update UI elements
         sendBtn.textContent = languageConfig[currentLanguage].sendBtn;
         userInput.placeholder = isVoiceMode ? 
             languageConfig[currentLanguage].voiceInputPlaceholder : 
             languageConfig[currentLanguage].inputPlaceholder;
         
-        // Clear chat and reset state
         chatMessages.innerHTML = '';
         isAskingName = true;
         userName = "";
         
-        // Reset conversation history with new system prompt
         conversationHistory = [initializeSystemPrompt()];
         
-        // Add greeting message
         const greeting = languageConfig[currentLanguage].greeting(currentTutor.name);
         addMessage(greeting, false);
     }
 
-    // Event listeners
     sendBtn.addEventListener('click', sendMessage);
     userInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
@@ -692,7 +932,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Voice input event listeners
     micBtn.addEventListener('click', () => {
         if (isRecording) {
             stopRecording();
@@ -704,40 +943,33 @@ document.addEventListener('DOMContentLoaded', () => {
     textModeBtn.addEventListener('click', () => toggleInputMode('text'));
     voiceModeBtn.addEventListener('click', () => toggleInputMode('voice'));
     
-    // Tutor selection event listeners
     tutorButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             changeTutor(btn.dataset.tutor);
         });
     });
     
-    // Language selection event listeners
     languageButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             changeLanguage(btn.dataset.lang);
         });
     });
     
-    // Initialize 
     initSpeechRecognition();
-    toggleInputMode('text'); // Start in text mode by default
+    toggleInputMode('text'); 
     conversationHistory = [initializeSystemPrompt()];
     addMessage(languageConfig[currentLanguage].greeting(currentTutor.name), false);
 
-    // Service worker registration with improved error handling
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('sw.js', {scope: './'})
                 .then(reg => {
                     console.log('Service Worker registered with scope:', reg.scope);
-                    // Update service worker if needed
                     reg.update().catch(err => console.log('Service Worker update failed:', err));
                     
-                    // Check for existing controller
                     if (navigator.serviceWorker.controller) {
                         console.log('Service Worker is controlling the page');
                         
-                        // If we're in PWA mode, tell the service worker
                         if (isPWA()) {
                             navigator.serviceWorker.controller.postMessage({
                                 type: 'SET_PWA_MODE'
@@ -747,7 +979,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
                 .catch(err => {
                     console.log('Service Worker registration failed:', err);
-                    // Continue without service worker
                 });
         });
     }

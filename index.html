@@ -81,6 +81,23 @@
                 <button id="send-btn">Send</button>
             </div>
         </div>
+        
+        <!-- API Key Settings Dialog -->
+        <div id="api-settings" class="api-settings">
+            <div class="api-settings-content">
+                <span class="close-settings">&times;</span>
+                <h2>AI Provider Settings</h2>
+                <p>To enable enhanced AI features, you can provide an OpenAI API key. Without an API key, the app will use simpler responses.</p>
+                <div class="input-group">
+                    <label for="openai-key">OpenAI API Key:</label>
+                    <input type="password" id="openai-key" placeholder="sk-...">
+                </div>
+                <div class="settings-buttons">
+                    <button id="save-api-settings">Save</button>
+                    <button id="clear-api-settings">Clear Keys</button>
+                </div>
+            </div>
+        </div>
     </div>
     <script src="script.js"></script>
     <script>
