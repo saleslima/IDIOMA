@@ -19,6 +19,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let audioCache = {};
     let deferredPrompt = null;
     
+    // Add PWA detection
+    const isPWA = () => {
+        return window.matchMedia('(display-mode: standalone)').matches || 
+               window.navigator.standalone === true;
+    };
+    
+    // Store PWA status in sessionStorage for consistent access
+    if (isPWA()) {
+        sessionStorage.setItem('pwaMode', 'true');
+        
+        // Communicate to service worker that we're in PWA mode
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+                type: 'SET_PWA_MODE'
+            });
+        }
+    }
+    
     // Character settings
     let currentTutor = {
         id: "marcio",
@@ -42,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // PWA Installation
+    // PWA Installation - improved for online deployment
     window.addEventListener('beforeinstallprompt', (e) => {
         // Prevent Chrome 67 and earlier from automatically showing the prompt
         e.preventDefault();
@@ -50,52 +68,86 @@ document.addEventListener('DOMContentLoaded', () => {
         deferredPrompt = e;
         // Update UI to show the install button
         installBtn.style.display = 'block';
+        
+        // Log that the installation prompt was detected
+        console.log('Installation prompt detected and saved');
     });
 
     installBtn.addEventListener('click', async () => {
         if (!deferredPrompt) {
             // The app is already installed or not installable
+            // For Safari on iOS where beforeinstallprompt is not supported
+            alert('To install this app on iOS: tap the share button and then "Add to Home Screen"');
             return;
         }
+        
         // Show the installation prompt
         deferredPrompt.prompt();
-        // Wait for the user to respond to the prompt
-        const { outcome } = await deferredPrompt.userChoice;
+        
+        try {
+            // Wait for the user to respond to the prompt
+            const { outcome } = await deferredPrompt.userChoice;
+            console.log(`Installation outcome: ${outcome}`);
+            
+            if (outcome === 'accepted') {
+                console.log('App was installed');
+                
+                // Prepare for redirection after installation
+                sessionStorage.setItem('installAccepted', 'true');
+                
+                // On next launch, the PWA detection in index.html will handle redirection
+            }
+        } catch (error) {
+            console.error('Error during installation:', error);
+        }
+        
         // We no longer need the prompt
         deferredPrompt = null;
+        
         // Hide the install button
         installBtn.style.display = 'none';
     });
 
-    // Hide the install button by default - will show only if the app can be installed
-    installBtn.style.display = 'none';
-
-    // Initialize speech recognition
+    // Initialize speech recognition - improved error handling
     function initSpeechRecognition() {
         if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                userInput.value = transcript;
-                stopRecording();
-                sendMessage();
-            };
-            
-            recognition.onerror = (event) => {
-                console.error('Speech recognition error', event.error);
-                stopRecording();
-            };
-            
-            recognition.onend = () => {
-                stopRecording();
-            };
+            try {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    userInput.value = transcript;
+                    stopRecording();
+                    sendMessage();
+                };
+                
+                recognition.onerror = (event) => {
+                    console.error('Speech recognition error', event.error);
+                    stopRecording();
+                    
+                    // Show a user-friendly error message
+                    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+                        alert('Please allow microphone access to use voice input.');
+                    } else if (event.error === 'network') {
+                        alert('Network error occurred. Please check your connection.');
+                    }
+                };
+                
+                recognition.onend = () => {
+                    stopRecording();
+                };
+            } catch (error) {
+                console.error('Error initializing speech recognition:', error);
+                voiceModeBtn.disabled = true;
+            }
         } else {
-            alert('Your browser does not support speech recognition. Please use Chrome or Edge.');
+            console.log('Speech recognition not supported in this browser');
             voiceModeBtn.disabled = true;
+            // Hide voice mode button on unsupported browsers
+            voiceModeBtn.style.display = 'none';
         }
     }
     
@@ -338,7 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // Generate AI response
+    // Generate AI response - improved error handling for online deployment
     async function generateAIResponse(userText) {
         try {
             // Add user message to conversation history
@@ -362,7 +414,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             // Parse the response
-            const result = JSON.parse(completion.content);
+            let result;
+            try {
+                result = JSON.parse(completion.content);
+            } catch (parseError) {
+                console.error("Error parsing AI response:", parseError);
+                // Fallback for when the response isn't valid JSON
+                result = {
+                    response: completion.content || "I'm sorry, I couldn't generate a proper response.",
+                    corrections: []
+                };
+            }
             
             // Add AI response to conversation history
             conversationHistory.push({
@@ -374,7 +436,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error("Error generating AI response:", error);
             return {
-                response: "I'm sorry, I'm having trouble processing your message. Could you try again?",
+                response: "I'm sorry, I'm having trouble connecting to the AI service. Please check your internet connection and try again.",
                 corrections: []
             };
         }
@@ -564,4 +626,32 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleInputMode('text'); // Start in text mode by default
     conversationHistory = [initializeSystemPrompt()];
     addMessage(languageConfig[currentLanguage].greeting(currentTutor.name), false);
+
+    // Service worker registration with improved error handling
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js', {scope: './'})
+                .then(reg => {
+                    console.log('Service Worker registered with scope:', reg.scope);
+                    // Update service worker if needed
+                    reg.update().catch(err => console.log('Service Worker update failed:', err));
+                    
+                    // Check for existing controller
+                    if (navigator.serviceWorker.controller) {
+                        console.log('Service Worker is controlling the page');
+                        
+                        // If we're in PWA mode, tell the service worker
+                        if (isPWA()) {
+                            navigator.serviceWorker.controller.postMessage({
+                                type: 'SET_PWA_MODE'
+                            });
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.log('Service Worker registration failed:', err);
+                    // Continue without service worker
+                });
+        });
+    }
 });

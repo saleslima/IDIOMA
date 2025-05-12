@@ -1,16 +1,21 @@
-// Service Worker for Language Conversation Practice App
+// Updated Service Worker for Language Conversation Practice App
 
-const CACHE_NAME = 'language-practice-cache-v3';
+const CACHE_NAME = 'language-practice-cache-v4';
 const GITHUB_REDIRECT_URL = 'https://saleslima.github.io/IDIOMA/';
+
+// Determine the base path - handles both root and subdirectory hosting
+const BASE_PATH = self.location.pathname.replace(/\/sw\.js$/, '');
+
+// Dynamically construct URLs to cache based on current location
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/styles.css',
-  '/script.js',
-  '/marcio_tutor.png',
-  '/nathalia_tutor.png',
-  '/app_icon.png',
-  '/manifest.json'
+  `${BASE_PATH}/`,
+  `${BASE_PATH}/index.html`,
+  `${BASE_PATH}/styles.css`,
+  `${BASE_PATH}/script.js`,
+  `${BASE_PATH}/marcio_tutor.png`,
+  `${BASE_PATH}/nathalia_tutor.png`,
+  `${BASE_PATH}/app_icon.png`,
+  `${BASE_PATH}/manifest.json`
 ];
 
 // Install event - cache assets
@@ -21,63 +26,111 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
+        console.log('Caching app assets:', urlsToCache);
         return cache.addAll(urlsToCache);
+      })
+      .catch(error => {
+        console.error('Error caching app assets:', error);
       })
   );
 });
 
 // Activate event - clean up old caches and claim clients
 self.addEventListener('activate', event => {
-  // Take control of all clients as soon as it activates
-  event.waitUntil(clients.claim());
+  console.log('Service worker activating');
   
+  // Take control of all clients as soon as it activates
   event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    clients.claim()
+      .then(() => {
+        return caches.keys().then(cacheNames => {
+          return Promise.all(
+            cacheNames.map(cacheName => {
+              if (cacheName !== CACHE_NAME) {
+                console.log('Deleting old cache:', cacheName);
+                return caches.delete(cacheName);
+              }
+            })
+          );
+        });
+      })
   );
 });
 
-// Fetch event - handle navigation and redirect to GitHub Pages
+// Fetch event - improved PWA detection and redirect logic
 self.addEventListener('fetch', event => {
-  // Check if this is a navigation request (app launch)
-  if (event.request.mode === 'navigate') {
-    // Get client information
-    event.respondWith(
-      clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true
-      }).then(clients => {
-        // For PWA standalone mode
-        if (clients.length === 0) {
-          // No clients - likely PWA launch
-          console.log("PWA launch detected - redirecting from SW");
-          return Response.redirect(GITHUB_REDIRECT_URL, 302);
+  // First, check for an exact cache match
+  event.respondWith(
+    caches.match(event.request, { ignoreSearch: false })
+      .then(cachedResponse => {
+        if (cachedResponse) {
+          // If we have a cached response, use it
+          return cachedResponse;
         }
         
-        // For normal web use, fetch the requested page
-        return fetch(event.request).catch(() => {
-          return caches.match('/index.html');
-        });
-      })
-    );
-    return;
-  }
-  
-  // For other requests, use the regular caching strategy
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        if (response) {
-          return response;
-        }
-        return fetch(event.request);
+        // Otherwise fetch from network
+        return fetch(event.request)
+          .then(response => {
+            // If this is a navigation request and we're in standalone mode,
+            // check if we need to redirect
+            if (event.request.mode === 'navigate') {
+              // Clone the response so we can return it and also check it
+              const responseClone = response.clone();
+              
+              // Check if we're in PWA mode and need to redirect
+              clients.matchAll({
+                type: 'window',
+                includeUncontrolled: false
+              }).then(clientList => {
+                clientList.forEach(client => {
+                  // If we have a client window and it appears to be in standalone mode
+                  if (client.url.includes('?standalone=true') || 
+                      client.url.includes('&standalone=true') ||
+                      sessionStorage.getItem('pwaMode') === 'true') {
+                    
+                    // Only redirect if we haven't already
+                    if (!sessionStorage.getItem('redirected')) {
+                      sessionStorage.setItem('redirected', 'true');
+                      client.navigate(GITHUB_REDIRECT_URL);
+                    }
+                  }
+                });
+              });
+              
+              return responseClone;
+            }
+            
+            return response;
+          })
+          .catch(error => {
+            console.error('Fetch error:', error);
+            
+            // If it's a navigation request, return the cached index.html
+            if (event.request.mode === 'navigate') {
+              return caches.match(`${BASE_PATH}/index.html`);
+            }
+            
+            // Otherwise return a simple error
+            return new Response('Network error', {
+              status: 408,
+              headers: new Headers({
+                'Content-Type': 'text/plain'
+              })
+            });
+          });
       })
   );
+});
+
+// Listen for message events (useful for communication with the main page)
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+  
+  if (event.data && event.data.type === 'SET_PWA_MODE') {
+    console.log('Setting PWA mode in service worker');
+    // We can use this to store PWA mode state
+    sessionStorage.setItem('pwaMode', 'true');
+  }
 });

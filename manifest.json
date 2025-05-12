@@ -2,7 +2,7 @@
   "name": "Language Conversation Practice",
   "short_name": "LangPractice",
   "description": "Practice conversations in multiple languages with AI tutors",
-  "start_url": "./index.html",
+  "start_url": "./index.html?standalone=true",
   "scope": "./",
   "display": "standalone",
   "background_color": "#4285f4",

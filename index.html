@@ -10,18 +10,21 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="LangPractice">
     <link rel="apple-touch-icon" href="app_icon.png">
-    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <script>
-        // Improved PWA detection and redirect
+        // Updated PWA detection and redirect that works across environments
         window.addEventListener('load', () => {
             // Check if app is running as installed PWA
             if (window.matchMedia('(display-mode: standalone)').matches || 
                 window.navigator.standalone === true) {
                 console.log("PWA mode detected - redirecting to GitHub Pages");
-                // Redirect with a slight delay to ensure it works on all devices
-                setTimeout(() => {
+                
+                // Store the current URL to detect if redirecting is needed
+                if (!sessionStorage.getItem('redirected')) {
+                    sessionStorage.setItem('redirected', 'true');
+                    // Redirect to GitHub Pages
                     window.location.href = 'https://saleslima.github.io/IDIOMA/';
-                }, 100);
+                }
             }
         });
     </script>
