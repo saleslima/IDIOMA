@@ -21,7 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let isExternalServer = false;
     let aiProvider = null;
 
-    // Predefined OpenAI API key for use outside of websim environment
     const DEFAULT_OPENAI_KEY = "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";
 
     class AIProviders {
@@ -32,6 +31,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     available: false,
                     chat: this.websimChat.bind(this),
                     tts: this.websimTTS.bind(this)
+                },
+                deepseek: {
+                    name: 'deepseek',
+                    available: false,
+                    apiKey: '',
+                    chat: this.deepseekChat.bind(this),
+                    tts: null
                 },
                 openai: {
                     name: 'openai',
@@ -67,24 +73,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('Websim API not available');
             }
 
-            // Try to get user's saved API key first
+            const deepseekKey = localStorage.getItem('deepseek_api_key');
             const openaiKey = localStorage.getItem('openai_api_key');
+
+            const DEFAULT_DEEPSEEK_KEY = "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";
+            
+            if (deepseekKey) {
+                this.providers.deepseek.apiKey = deepseekKey;
+                this.providers.deepseek.available = true;
+                console.log('Using saved Deepseek API key');
+            } else {
+                this.providers.deepseek.apiKey = DEFAULT_DEEPSEEK_KEY;
+                this.providers.deepseek.available = true;
+                console.log('Using default Deepseek API key');
+            }
 
             if (openaiKey) {
                 this.providers.openai.apiKey = openaiKey;
                 this.providers.openai.available = true;
                 console.log('Using saved OpenAI API key');
             } else {
-                // If no saved key, use the default key
                 this.providers.openai.apiKey = DEFAULT_OPENAI_KEY;
                 this.providers.openai.available = true;
                 console.log('Using default OpenAI API key');
             }
 
-            // Set provider priority
             if (this.providers.websim.available) {
                 this.primaryProvider = 'websim';
                 console.log('Using websim as primary provider');
+            } else if (this.providers.deepseek.available) {
+                this.primaryProvider = 'deepseek';
+                console.log('Using Deepseek as primary provider');
             } else if (this.providers.openai.available) {
                 this.primaryProvider = 'openai';
                 console.log('Using OpenAI as primary provider');
@@ -101,7 +120,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.ttsProvider = 'fallback';
             }
 
-            // Add provider indicator to the UI
             this.updateProviderIndicator();
 
             console.log(`Using AI provider: ${this.primaryProvider}`);
@@ -146,8 +164,25 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error(`Error with ${this.primaryProvider} chat:`, error);
 
-                // If websim fails, try OpenAI before falling back to simple responses
-                if (this.primaryProvider === 'websim' && this.providers.openai.available) {
+                if (this.primaryProvider === 'websim') {
+                    if (this.providers.deepseek.available) {
+                        try {
+                            console.log('Falling back to Deepseek');
+                            return await this.providers.deepseek.chat(messages);
+                        } catch (deepseekError) {
+                            console.error('Deepseek fallback failed:', deepseekError);
+                        }
+                    }
+                    
+                    if (this.providers.openai.available) {
+                        try {
+                            console.log('Falling back to OpenAI');
+                            return await this.providers.openai.chat(messages);
+                        } catch (openaiError) {
+                            console.error('OpenAI fallback failed:', openaiError);
+                        }
+                    }
+                } else if (this.primaryProvider === 'deepseek' && this.providers.openai.available) {
                     try {
                         console.log('Falling back to OpenAI');
                         return await this.providers.openai.chat(messages);
@@ -200,6 +235,49 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         }
 
+        async deepseekChat(messages) {
+            const formattedMessages = messages.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+
+            try {
+                const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.providers.deepseek.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'deepseek-chat',
+                        messages: formattedMessages,
+                        temperature: 0.7
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('Deepseek API error:', errorData);
+                    throw new Error(`Deepseek API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+                }
+
+                const data = await response.json();
+                const content = data.choices[0].message.content;
+
+                try {
+                    return JSON.parse(content);
+                } catch (error) {
+                    return {
+                        response: content,
+                        corrections: []
+                    };
+                }
+            } catch (error) {
+                console.error('Deepseek API error:', error);
+                throw error;
+            }
+        }
+
         async openaiChat(messages) {
             const formattedMessages = messages.map(msg => ({
                 role: msg.role,
@@ -232,7 +310,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     return JSON.parse(content);
                 } catch (error) {
-                    // If the response isn't valid JSON, handle it gracefully
                     return {
                         response: content,
                         corrections: []
@@ -1029,38 +1106,60 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // API Settings Dialog functionality
     const apiSettings = document.getElementById('api-settings');
+    const deepseekKey = document.getElementById('deepseek-key');
     const openaiKey = document.getElementById('openai-key');
     const saveApiSettings = document.getElementById('save-api-settings');
     const clearApiSettings = document.getElementById('clear-api-settings');
     const closeSettings = document.querySelector('.close-settings');
 
     saveApiSettings.addEventListener('click', () => {
-        const key = openaiKey.value.trim();
-        if (key && key.startsWith('sk-')) {
-            localStorage.setItem('openai_api_key', key);
-            aiAPI.providers.openai.apiKey = key;
-            aiAPI.providers.openai.available = true;
+        const dsKey = deepseekKey.value.trim();
+        const oaiKey = openaiKey.value.trim();
+        let keysUpdated = false;
 
+        if (dsKey && dsKey.startsWith('sk-')) {
+            localStorage.setItem('deepseek_api_key', dsKey);
+            aiAPI.providers.deepseek.apiKey = dsKey;
+            aiAPI.providers.deepseek.available = true;
+            keysUpdated = true;
+        }
+
+        if (oaiKey && oaiKey.startsWith('sk-')) {
+            localStorage.setItem('openai_api_key', oaiKey);
+            aiAPI.providers.openai.apiKey = oaiKey;
+            aiAPI.providers.openai.available = true;
+            keysUpdated = true;
+        }
+
+        if (keysUpdated) {
             if (aiAPI.primaryProvider !== 'websim') {
-                aiAPI.primaryProvider = 'openai';
+                if (aiAPI.providers.deepseek.available) {
+                    aiAPI.primaryProvider = 'deepseek';
+                } else if (aiAPI.providers.openai.available) {
+                    aiAPI.primaryProvider = 'openai';
+                }
                 aiAPI.updateProviderIndicator();
             }
 
-            alert('API key saved successfully!');
+            alert('API key(s) saved successfully!');
             apiSettings.style.display = 'none';
         } else {
-            alert('Please enter a valid OpenAI API key starting with "sk-"');
+            alert('Please enter at least one valid API key starting with "sk-"');
         }
     });
 
     clearApiSettings.addEventListener('click', () => {
-        if (confirm('Are you sure you want to clear your API keys? This will revert to using the default key.')) {
+        if (confirm('Are you sure you want to clear your API keys? This will revert to using the default keys.')) {
+            localStorage.removeItem('deepseek_api_key');
             localStorage.removeItem('openai_api_key');
+            
+            aiAPI.providers.deepseek.apiKey = "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";
             aiAPI.providers.openai.apiKey = DEFAULT_OPENAI_KEY;
+            
+            deepseekKey.value = '';
             openaiKey.value = '';
-            alert('API keys cleared. Using default key now.');
+            alert('API keys cleared. Using default keys now.');
 
             if (aiAPI.primaryProvider !== 'websim') {
                 aiAPI.updateProviderIndicator();
@@ -1072,20 +1171,26 @@ document.addEventListener('DOMContentLoaded', () => {
         apiSettings.style.display = 'none';
     });
 
-    // Add API settings button to the header
     const headerTop = document.querySelector('.header-top');
     const settingsButton = document.createElement('button');
     settingsButton.className = 'settings-icon';
     settingsButton.innerHTML = '<i class="fas fa-cog"></i>';
     settingsButton.title = 'API Settings';
     settingsButton.addEventListener('click', () => {
-        // Pre-fill with current value if available
+        if (aiAPI.providers.deepseek.apiKey && 
+            aiAPI.providers.deepseek.apiKey !== "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") {
+            deepseekKey.value = aiAPI.providers.deepseek.apiKey;
+        } else {
+            deepseekKey.value = '';
+            deepseekKey.placeholder = 'Using default Deepseek API key';
+        }
+        
         if (aiAPI.providers.openai.apiKey && 
             aiAPI.providers.openai.apiKey !== DEFAULT_OPENAI_KEY) {
             openaiKey.value = aiAPI.providers.openai.apiKey;
         } else {
             openaiKey.value = '';
-            openaiKey.placeholder = 'Using default API key';
+            openaiKey.placeholder = 'Using default OpenAI API key';
         }
         apiSettings.style.display = 'block';
     });

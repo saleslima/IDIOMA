@@ -87,14 +87,18 @@
             <div class="api-settings-content">
                 <span class="close-settings">&times;</span>
                 <h2>AI Provider Settings</h2>
-                <p>A default OpenAI API key is already provided. You can use your own key for better performance.</p>
+                <p>Default API keys are provided for basic functionality. You can use your own keys for better performance.</p>
                 <div class="input-group">
-                    <label for="openai-key">OpenAI API Key:</label>
-                    <input type="password" id="openai-key" placeholder="Using default API key">
+                    <label for="deepseek-key">Deepseek API Key (Primary):</label>
+                    <input type="password" id="deepseek-key" placeholder="Using default Deepseek API key">
+                </div>
+                <div class="input-group">
+                    <label for="openai-key">OpenAI API Key (Secondary):</label>
+                    <input type="password" id="openai-key" placeholder="Using default OpenAI API key">
                 </div>
                 <div class="settings-buttons">
                     <button id="save-api-settings">Save</button>
-                    <button id="clear-api-settings">Use Default Key</button>
+                    <button id="clear-api-settings">Use Default Keys</button>
                 </div>
             </div>
         </div>
